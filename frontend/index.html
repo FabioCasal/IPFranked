@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPFranked</title>
+<script src="/vendor/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --panel-2: #1e2229;
+    --border: #2a2f3a;
+    --text: #e8eaed;
+    --text-dim: #9aa1ac;
+    --accent: #4f8cff;
+    --accent-2: #ff6b4a;
+    --gold: #d4af37;
+    --silver: #b0b8c1;
+    --bronze: #c17a4a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+  }
+  header {
+    padding: 20px 28px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: 0.3px; cursor: pointer; }
+  header h1 span { color: var(--accent); }
+  nav { display: flex; gap: 4px; }
+  nav button {
+    background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  nav button.active { background: var(--accent); color: white; border-color: var(--accent); }
+  main { padding: 24px 28px; max-width: 1100px; margin: 0 auto; }
+  .view { display: none; }
+  .view.active { display: block; }
+
+  .controls { display: flex; gap: 12px; margin-bottom: 18px; align-items: center; }
+  select, input {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 12px; border-radius: 6px; font-size: 14px;
+  }
+  select:focus, input:focus { outline: none; border-color: var(--accent); }
+  .back-link {
+    background: transparent; border: none; color: var(--text-dim); cursor: pointer;
+    font-size: 13px; padding: 8px 4px; margin-right: 4px;
+  }
+  .back-link:hover { color: var(--accent); }
+
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; font-size: 13px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.4px; }
+  tr:last-child td { border-bottom: none; }
+  tr.rank-row { cursor: pointer; }
+  tr.rank-row:hover { background: var(--panel-2); }
+  .rank-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; border-radius: 50%; font-weight: 700; font-size: 12px;
+    background: var(--panel-2); color: var(--text-dim);
+  }
+  .rank-badge.r1 { background: var(--gold); color: #1a1a1a; }
+  .rank-badge.r2 { background: var(--silver); color: #1a1a1a; }
+  .rank-badge.r3 { background: var(--bronze); color: #1a1a1a; }
+  .num { font-variant-numeric: tabular-nums; }
+
+  .search-wrap { position: relative; max-width: 420px; }
+  #search-results {
+    position: absolute; top: 100%; left: 0; right: 0; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 6px; margin-top: 4px; max-height: 280px;
+    overflow-y: auto; z-index: 10; display: none;
+  }
+  #search-results div { padding: 8px 12px; cursor: pointer; font-size: 13px; }
+  #search-results div:hover { background: var(--panel); }
+  #search-results .muted { color: var(--text-dim); font-size: 12px; }
+
+  #lifter-profile { margin-top: 20px; }
+  .profile-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 6px; flex-wrap: wrap; gap: 8px; }
+  .profile-header h2 { margin: 0; font-size: 22px; }
+  .profile-meta { color: var(--text-dim); font-size: 13px; margin-bottom: 20px; }
+  .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .stat-tile { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; }
+  .stat-tile .label { color: var(--text-dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 6px; }
+  .stat-tile .value { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat-tile .value small { font-size: 13px; color: var(--text-dim); font-weight: 400; }
+  .stat-tile .percentile { font-size: 12px; color: var(--accent); margin-top: 6px; font-weight: 600; }
+  .stat-tile .percentile .muted { color: var(--text-dim); font-weight: 400; }
+  .stat-tile .rank-tag {
+    display: inline-block; margin-top: 6px; padding: 2px 8px; border-radius: 4px;
+    background: var(--gold); color: #1a1a1a; font-size: 11px; font-weight: 700;
+  }
+
+  .chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 760px) { .chart-grid { grid-template-columns: 1fr; } }
+  .chart-wrap { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  .chart-wrap h3 { margin: 0 0 12px; font-size: 14px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
+
+  .empty { color: var(--text-dim); padding: 40px 0; text-align: center; }
+  .table-wrap { overflow-x: auto; background: var(--panel); border-radius: 8px; }
+  .table-wrap table { border-radius: 0; }
+
+  .division-group { margin-bottom: 36px; }
+  .division-group h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim);
+    font-weight: 700; margin: 0 0 14px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+  .champ-grid {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .champ-card {
+    background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--gold);
+    border-radius: 8px; padding: 12px 18px; cursor: pointer; transition: background 0.12s, border-color 0.12s;
+    display: flex; align-items: center; gap: 20px;
+  }
+  .champ-card:hover { background: var(--panel-2); border-color: var(--gold); }
+  .champ-card .wc-label {
+    color: var(--gold); font-size: 12px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.5px; width: 64px; flex: 0 0 auto;
+  }
+  .champ-card .champ-name { font-size: 16px; font-weight: 700; width: 220px; flex: 0 0 auto; }
+  .champ-card .champ-lifts { color: var(--text-dim); font-size: 12px; flex: 1 1 auto; }
+  .champ-card .champ-stats {
+    display: flex; align-items: baseline; gap: 20px;
+    font-variant-numeric: tabular-nums; flex: 0 0 auto;
+  }
+  .champ-card .champ-total { font-size: 18px; font-weight: 700; text-align: right; }
+  .champ-card .champ-total small { font-size: 11px; color: var(--text-dim); font-weight: 400; }
+
+  @media (max-width: 800px) {
+    .champ-card { flex-wrap: wrap; }
+    .champ-card .champ-name { width: auto; }
+    .champ-card .champ-lifts { flex-basis: 100%; order: 4; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="home-link"><span>IPF</span>ranked</h1>
+  <nav>
+    <button id="nav-lifter">Lifter Dashboard</button>
+  </nav>
+</header>
+
+<main>
+  <section id="view-champions" class="view active">
+    <div id="champions-body">
+      <div class="empty">Loading…</div>
+    </div>
+  </section>
+
+  <section id="view-rankings" class="view">
+    <div class="controls">
+      <button id="back-to-champions" class="back-link">&larr; Rankings</button>
+      <select id="sex-select">
+        <option value="M">Men</option>
+        <option value="F">Women</option>
+      </select>
+      <select id="class-select"></select>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th><th>Lifter</th><th class="num">Total</th><th class="num">Squat</th>
+            <th class="num">Bench</th><th class="num">Deadlift</th><th class="num">BWt</th>
+            <th class="num">GL Pts</th><th>Federation</th><th>Date</th>
+          </tr>
+        </thead>
+        <tbody id="rankings-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="view-lifter" class="view">
+    <div class="search-wrap">
+      <input id="search-input" type="text" placeholder="Search lifter by name..." autocomplete="off">
+      <div id="search-results"></div>
+    </div>
+    <div id="lifter-profile"></div>
+  </section>
+</main>
+
+<script>
+const api = (path) => fetch(path).then(r => {
+  if (!r.ok) throw new Error('Request failed: ' + r.status);
+  return r.json();
+});
+const fmt = (v, d = 1) => (v === null || v === undefined) ? '—' : Number(v).toFixed(d);
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+function ordinalSuffix(n) {
+  const v = Math.floor(n) % 100;
+  if (v >= 11 && v <= 13) return 'th';
+  return { 1: 'st', 2: 'nd', 3: 'rd' }[Math.floor(n) % 10] || 'th';
+}
+function percentileHtml(p, rankInfo) {
+  const rankBadge = rankInfo ? `<div class="rank-tag">#${rankInfo.rank} current rank</div>` : '';
+  const percentileLine = p
+    ? `<div class="percentile">${p.percentile}<sup>${ordinalSuffix(p.percentile)}</sup> percentile <span class="muted">(${p.weight_class_kg}kg class)</span></div>`
+    : '';
+  return percentileLine + rankBadge;
+}
+
+// ---------- Nav ----------
+// The landing rankings page has no nav button of its own — it's reached via
+// the "OpenIPF Dashboard" title (home link) or a champion card's back-link.
+const navs = {
+  lifter: document.getElementById('nav-lifter'),
+};
+const views = {
+  champions: document.getElementById('view-champions'),
+  rankings: document.getElementById('view-rankings'),
+  lifter: document.getElementById('view-lifter'),
+};
+function showView(name) {
+  for (const key in views) {
+    views[key].classList.toggle('active', key === name);
+  }
+  for (const key in navs) {
+    navs[key].classList.toggle('active', key === name);
+  }
+}
+navs.lifter.onclick = () => showView('lifter');
+document.getElementById('home-link').onclick = () => showView('champions');
+document.getElementById('back-to-champions').onclick = () => showView('champions');
+
+// ---------- Champions ----------
+const SEX_LABELS = { M: "Men's Divisions", F: "Women's Divisions" };
+const championsBody = document.getElementById('champions-body');
+
+async function loadChampions() {
+  const data = await api('/api/champions');
+  championsBody.innerHTML = Object.entries(SEX_LABELS).map(([sex, label]) => `
+    <div class="division-group">
+      <h2>${label}</h2>
+      <div class="champ-grid">
+        ${(data[sex] || []).map(c => `
+          <div class="champ-card" data-sex="${sex}" data-class="${c.weight_class_kg}">
+            <div class="wc-label">${c.weight_class_kg} kg</div>
+            <div class="champ-name">${c.name}</div>
+            <div class="champ-lifts">S ${fmt(c.best_squat_kg, 0)} · B ${fmt(c.best_bench_kg, 0)} · D ${fmt(c.best_deadlift_kg, 0)}</div>
+            <div class="champ-stats">
+              <div class="champ-total">${fmt(c.total_kg, 1)} <small>kg total</small></div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `).join('');
+  [...championsBody.querySelectorAll('.champ-card')].forEach(card => {
+    card.onclick = async () => {
+      showView('rankings');
+      sexSelect.value = card.dataset.sex;
+      await loadClasses();
+      classSelect.value = card.dataset.class;
+      await loadRankings();
+    };
+  });
+}
+
+// ---------- Rankings ----------
+const sexSelect = document.getElementById('sex-select');
+const classSelect = document.getElementById('class-select');
+const rankingsBody = document.getElementById('rankings-body');
+
+async function loadClasses() {
+  const data = await api(`/api/weight-classes?sex=${sexSelect.value}`);
+  classSelect.innerHTML = data.weight_classes.map(c => `<option value="${c}">${c} kg</option>`).join('');
+}
+
+async function loadRankings() {
+  const sex = sexSelect.value, wc = classSelect.value;
+  if (!wc) return;
+  rankingsBody.innerHTML = `<tr><td colspan="10" class="empty">Loading…</td></tr>`;
+  const data = await api(`/api/rankings?sex=${sex}&weight_class=${encodeURIComponent(wc)}`);
+  if (!data.lifters.length) {
+    rankingsBody.innerHTML = `<tr><td colspan="10" class="empty">No data</td></tr>`;
+    return;
+  }
+  rankingsBody.innerHTML = data.lifters.map(l => `
+    <tr class="rank-row" data-key="${l.lifter_key}">
+      <td><span class="rank-badge ${l.rank <= 3 ? 'r' + l.rank : ''}">${l.rank}</span></td>
+      <td>${l.name}</td>
+      <td class="num">${fmt(l.total_kg)}</td>
+      <td class="num">${fmt(l.best_squat_kg)}</td>
+      <td class="num">${fmt(l.best_bench_kg)}</td>
+      <td class="num">${fmt(l.best_deadlift_kg)}</td>
+      <td class="num">${fmt(l.bodyweight_kg)}</td>
+      <td class="num">${fmt(l.goodlift)}</td>
+      <td>${l.federation ?? '—'}</td>
+      <td>${fmtDate(l.meet_date)}</td>
+    </tr>
+  `).join('');
+  [...rankingsBody.querySelectorAll('tr.rank-row')].forEach(tr => {
+    tr.onclick = () => openLifter(tr.dataset.key);
+  });
+}
+
+sexSelect.onchange = async () => { await loadClasses(); await loadRankings(); };
+classSelect.onchange = loadRankings;
+
+// ---------- Lifter search ----------
+const searchInput = document.getElementById('search-input');
+const searchResults = document.getElementById('search-results');
+let searchTimer = null;
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchInput.value.trim();
+  if (q.length < 2) { searchResults.style.display = 'none'; return; }
+  searchTimer = setTimeout(async () => {
+    const data = await api(`/api/lifters/search?q=${encodeURIComponent(q)}`);
+    if (!data.results.length) {
+      searchResults.innerHTML = `<div class="muted">No matches</div>`;
+    } else {
+      searchResults.innerHTML = data.results.map(r => `
+        <div data-key="${r.lifter_key}">${r.name} <span class="muted">· ${r.sex} · ${r.meet_count} meets · best total ${fmt(r.best_total_kg, 0)}kg</span></div>
+      `).join('');
+      [...searchResults.children].forEach((el, i) => {
+        el.onclick = () => { openLifter(data.results[i].lifter_key); searchResults.style.display = 'none'; searchInput.value = data.results[i].name; };
+      });
+    }
+    searchResults.style.display = 'block';
+  }, 250);
+});
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-wrap')) searchResults.style.display = 'none';
+});
+
+const progressionCharts = { total: null, squat: null, bench: null, deadlift: null };
+
+async function openLifter(key) {
+  showView('lifter');
+  const profileEl = document.getElementById('lifter-profile');
+  profileEl.innerHTML = `<div class="empty">Loading…</div>`;
+  const p = await api(`/api/lifters/${encodeURIComponent(key)}`);
+
+  const b = p.bests;
+  profileEl.innerHTML = `
+    <div class="profile-header">
+      <h2>${p.name}</h2>
+    </div>
+    <div class="stat-row">
+      <div class="stat-tile"><div class="label">Best Raw Total</div><div class="value">${fmt(b.total_kg_raw, 1)} <small>kg</small></div>${percentileHtml(p.percentiles.total, p.current_ranks.total)}</div>
+      <div class="stat-tile"><div class="label">Best Raw Squat</div><div class="value">${fmt(b.squat_kg_raw, 1)} <small>kg</small></div>${percentileHtml(p.percentiles.squat, p.current_ranks.squat)}</div>
+      <div class="stat-tile"><div class="label">Best Raw Bench</div><div class="value">${fmt(b.bench_kg_raw, 1)} <small>kg</small></div>${percentileHtml(p.percentiles.bench, p.current_ranks.bench)}</div>
+      <div class="stat-tile"><div class="label">Best Raw Deadlift</div><div class="value">${fmt(b.deadlift_kg_raw, 1)} <small>kg</small></div>${percentileHtml(p.percentiles.deadlift, p.current_ranks.deadlift)}</div>
+      <div class="stat-tile"><div class="label">Best Dots</div><div class="value">${fmt(b.dots, 2)}</div></div>
+    </div>
+    <div class="chart-grid">
+      <div class="chart-wrap">
+        <h3>Total Progression</h3>
+        <canvas id="chart-total" height="140"></canvas>
+      </div>
+      <div class="chart-wrap">
+        <h3>Squat Progression</h3>
+        <canvas id="chart-squat" height="140"></canvas>
+      </div>
+      <div class="chart-wrap">
+        <h3>Bench Progression</h3>
+        <canvas id="chart-bench" height="140"></canvas>
+      </div>
+      <div class="chart-wrap">
+        <h3>Deadlift Progression</h3>
+        <canvas id="chart-deadlift" height="140"></canvas>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th><th>Meet</th><th>Fed</th><th>Equip.</th><th>Division</th>
+            <th class="num">BWt</th><th class="num">Squat</th><th class="num">Bench</th>
+            <th class="num">Deadlift</th><th class="num">Total</th><th>Place</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${[...p.meets].reverse().map(m => `
+            <tr>
+              <td>${fmtDate(m.meet_date)}</td>
+              <td>${m.meet_name ?? '—'}</td>
+              <td>${m.federation ?? '—'}</td>
+              <td>${m.equipment ?? '—'}</td>
+              <td>${m.division ?? '—'}</td>
+              <td class="num">${fmt(m.bodyweight_kg)}</td>
+              <td class="num">${fmt(m.best_squat_kg)}</td>
+              <td class="num">${fmt(m.best_bench_kg)}</td>
+              <td class="num">${fmt(m.best_deadlift_kg)}</td>
+              <td class="num">${fmt(m.total_kg)}</td>
+              <td>${m.place ?? '—'}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  const prog = p.progression;
+  const chartSpecs = [
+    { key: 'total', field: 'total_kg', color: '#4f8cff' },
+    { key: 'squat', field: 'best_squat_kg', color: '#ff6b4a' },
+    { key: 'bench', field: 'best_bench_kg', color: '#d4af37' },
+    { key: 'deadlift', field: 'best_deadlift_kg', color: '#4fd68c' },
+  ];
+  for (const { key, field, color } of chartSpecs) {
+    if (progressionCharts[key]) progressionCharts[key].destroy();
+    const ctx = document.getElementById(`chart-${key}`).getContext('2d');
+    progressionCharts[key] = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: prog.map(x => x.date),
+        datasets: [{ label: key, data: prog.map(x => x[field]), borderColor: color, tension: 0.2 }],
+      },
+      options: {
+        responsive: true,
+        scales: {
+          x: { ticks: { color: '#9aa1ac' }, grid: { color: '#2a2f3a' } },
+          y: { ticks: { color: '#9aa1ac' }, grid: { color: '#2a2f3a' } },
+        },
+        plugins: { legend: { display: false } },
+      }
+    });
+  }
+}
+
+// ---------- init ----------
+(async function init() {
+  await loadChampions();
+  await loadClasses();
+  await loadRankings();
+})();
+</script>
+</body>
+</html>
