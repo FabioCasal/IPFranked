@@ -25,6 +25,23 @@ WEIGHT_CLASSES = {
 }
 
 
+def inferred_class_sql(bodyweight_expr, sex_expr):
+    """Some meets (e.g. Sheffield Powerlifting Championships) don't record a
+    WeightClassKg at all, which would otherwise silently exclude real
+    qualifying totals (including record-setting ones) from the leaderboard.
+    Fall back to the IPF class implied by recorded bodyweight."""
+    sex_cases = []
+    for sex, classes in WEIGHT_CLASSES.items():
+        thresholds, plus_label = classes[:-1], classes[-1]
+        when_clauses = "\n".join(
+            f"WHEN {bodyweight_expr} <= {t} THEN '{t}'" for t in thresholds
+        )
+        sex_cases.append(
+            f"WHEN {sex_expr} = '{sex}' THEN CASE {when_clauses} ELSE '{plus_label}' END"
+        )
+    return "CASE " + " ".join(sex_cases) + " END"
+
+
 def main():
     DB_PATH.unlink(missing_ok=True)
     con = duckdb.connect(str(DB_PATH))
@@ -72,7 +89,7 @@ def main():
     con.execute("CREATE INDEX idx_entries_lifter ON entries(lifter_key)")
     con.execute("CREATE INDEX idx_entries_class ON entries(sex, weight_class_kg)")
 
-    print("Building rankings_raw (each lifter's most recent Raw SBD meet in the last 2 years)...")
+    print("Building rankings_raw (each lifter's best Raw SBD meet in the last 2 years)...")
     classes_sql = " UNION ALL ".join(
         f"SELECT '{sex}' AS sex, '{wc}' AS weight_class_kg"
         for sex, classes in WEIGHT_CLASSES.items()
@@ -82,14 +99,20 @@ def main():
         CREATE TABLE valid_classes AS {classes_sql}
     """)
 
-    # Each lifter's single most recent qualifying meet in the last 2 years
-    # (not their career-best total) is what gets ranked.
-    con.execute("""
+    # Each lifter's best qualifying total in the last 2 years is what gets
+    # ranked (not simply whichever meet happens to be most recent) -- so a
+    # lifter can't get bumped down by competing again and doing worse, but
+    # still ages out of the window like any other rolling-activity ranking.
+    # Ties on total fall back to the most recent of the tied meets.
+    effective_class = inferred_class_sql("e.bodyweight_kg", "e.sex")
+    con.execute(f"""
         CREATE TABLE latest_per_lifter AS
-        SELECT e.*
+        SELECT e.* EXCLUDE (weight_class_kg),
+               COALESCE(NULLIF(trim(e.weight_class_kg), ''), {effective_class}) AS weight_class_kg
         FROM entries e
         JOIN valid_classes vc
-          ON e.sex = vc.sex AND e.weight_class_kg = vc.weight_class_kg
+          ON e.sex = vc.sex
+         AND COALESCE(NULLIF(trim(e.weight_class_kg), ''), {effective_class}) = vc.weight_class_kg
         WHERE e.equipment = 'Raw'
           AND e.event = 'SBD'
           AND e.place != 'DQ'
@@ -97,7 +120,7 @@ def main():
           AND e.meet_date >= CURRENT_DATE - INTERVAL 2 YEAR
         QUALIFY row_number() OVER (
             PARTITION BY e.lifter_key, e.sex
-            ORDER BY e.meet_date DESC
+            ORDER BY e.total_kg DESC, e.meet_date DESC
         ) = 1
     """)
 
