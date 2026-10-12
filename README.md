@@ -45,4 +45,4 @@ Open http://127.0.0.1:8000
 - There is no stable lifter ID in the OpenIPF export — lifters are identified by name
   (OpenIPF already appends `#2`, `#3`, etc. to disambiguate known duplicate names), so two
   different people sharing an undetected identical name could be merged into one profile.
-- Data is a snapshot (`openipf-2026-08-29`); rebuild the DB from a newer export to refresh.
+- Data is a snapshot (`openipf-2026-10-10`); rebuild the DB from a newer export to refresh.

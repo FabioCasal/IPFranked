@@ -13,7 +13,7 @@ import duckdb
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CSV_PATH = ROOT / "data" / "raw" / "openipf-2026-08-29-04805e21.csv"
+CSV_PATH = ROOT / "data" / "raw" / "openipf-2026-10-10-408a4d50.csv"
 DB_PATH = ROOT / "data" / "openipf.duckdb"
 
 # Current-day IPF senior/junior/sub-junior weight classes. Other values in the
@@ -112,16 +112,20 @@ def main():
             sex,
             weight_class_kg,
             row_number() OVER (
-                PARTITION BY sex, weight_class_kg ORDER BY total_kg DESC
+                PARTITION BY sex, weight_class_kg
+                ORDER BY total_kg DESC, bodyweight_kg ASC, meet_date ASC
             ) AS rank,
             row_number() OVER (
-                PARTITION BY sex, weight_class_kg ORDER BY best_squat_kg DESC NULLS LAST
+                PARTITION BY sex, weight_class_kg
+                ORDER BY best_squat_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC
             ) AS rank_squat,
             row_number() OVER (
-                PARTITION BY sex, weight_class_kg ORDER BY best_bench_kg DESC NULLS LAST
+                PARTITION BY sex, weight_class_kg
+                ORDER BY best_bench_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC
             ) AS rank_bench,
             row_number() OVER (
-                PARTITION BY sex, weight_class_kg ORDER BY best_deadlift_kg DESC NULLS LAST
+                PARTITION BY sex, weight_class_kg
+                ORDER BY best_deadlift_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC
             ) AS rank_deadlift,
             Name AS name,
             lifter_key,
