@@ -29,7 +29,12 @@ def inferred_class_sql(bodyweight_expr, sex_expr):
     """Some meets (e.g. Sheffield Powerlifting Championships) don't record a
     WeightClassKg at all, which would otherwise silently exclude real
     qualifying totals (including record-setting ones) from the leaderboard.
-    Fall back to the IPF class implied by recorded bodyweight."""
+    Fall back to the IPF class implied by recorded bodyweight.
+
+    When bodyweight is ALSO missing, there is nothing to infer from -- return
+    NULL (excluding the row entirely via the valid_classes join) rather than
+    falling through a bare CASE's ELSE, which would silently default every
+    such row into the heaviest "+" class regardless of their actual size."""
     sex_cases = []
     for sex, classes in WEIGHT_CLASSES.items():
         thresholds, plus_label = classes[:-1], classes[-1]
@@ -37,7 +42,11 @@ def inferred_class_sql(bodyweight_expr, sex_expr):
             f"WHEN {bodyweight_expr} <= {t} THEN '{t}'" for t in thresholds
         )
         sex_cases.append(
-            f"WHEN {sex_expr} = '{sex}' THEN CASE {when_clauses} ELSE '{plus_label}' END"
+            f"""WHEN {sex_expr} = '{sex}' THEN
+                CASE WHEN {bodyweight_expr} IS NULL THEN NULL
+                     {when_clauses}
+                     ELSE '{plus_label}'
+                END"""
         )
     return "CASE " + " ".join(sex_cases) + " END"
 
@@ -140,21 +149,25 @@ def main():
         SELECT
             sex,
             weight_class_kg,
+            -- lifter_key as a final tiebreak makes every rank fully
+            -- deterministic even for lifters tied on all of total/bodyweight
+            -- /date (otherwise genuinely ambiguous ties could rank
+            -- differently -- arbitrarily -- on every rebuild).
             row_number() OVER (
                 PARTITION BY sex, weight_class_kg
-                ORDER BY total_kg DESC, bodyweight_kg ASC, meet_date ASC
+                ORDER BY total_kg DESC, bodyweight_kg ASC, meet_date ASC, lifter_key ASC
             ) AS rank,
             row_number() OVER (
                 PARTITION BY sex, weight_class_kg
-                ORDER BY best_squat_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC
+                ORDER BY best_squat_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC, lifter_key ASC
             ) AS rank_squat,
             row_number() OVER (
                 PARTITION BY sex, weight_class_kg
-                ORDER BY best_bench_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC
+                ORDER BY best_bench_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC, lifter_key ASC
             ) AS rank_bench,
             row_number() OVER (
                 PARTITION BY sex, weight_class_kg
-                ORDER BY best_deadlift_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC
+                ORDER BY best_deadlift_kg DESC NULLS LAST, bodyweight_kg ASC, meet_date ASC, lifter_key ASC
             ) AS rank_deadlift,
             Name AS name,
             lifter_key,
