@@ -61,11 +61,18 @@ def population_percentile(sex, weight_class_kg, field, value, equipment="Raw", e
 
 
 def current_ranks_for(lifter_key):
-    """Each lift's rank in the app's own current ranking system (most recent
-    qualifying meet in the last 2 years), not an all-time historical rank."""
+    """Each lift's rank in the app's own current ranking system (best
+    qualifying meet in the last 2 years), not an all-time historical rank.
+
+    A lifter can have one rankings_raw row per weight class they've qualified
+    in within the window, and the four lifts' bests don't have to all come
+    from the same one -- e.g. their best-ranked squat and best-ranked total
+    could be from different meets in different classes. So each lift picks
+    its own best rank independently across all of that lifter's rows,
+    rather than reading all four off a single arbitrarily-chosen row."""
     con = db()
     try:
-        row = con.execute(
+        rows = con.execute(
             """
             SELECT weight_class_kg, rank, rank_squat, rank_bench, rank_deadlift,
                    total_kg, best_squat_kg, best_bench_kg, best_deadlift_kg
@@ -73,24 +80,25 @@ def current_ranks_for(lifter_key):
             WHERE lifter_key = ?
             """,
             [lifter_key],
-        ).fetchone()
+        ).fetchall()
     finally:
         con.close()
-    if not row:
+    if not rows:
         return {"total": None, "squat": None, "bench": None, "deadlift": None}
 
-    wc, rank, rank_squat, rank_bench, rank_deadlift, total_kg, squat_kg, bench_kg, deadlift_kg = row
-
-    def badge(rank_value, lift_value):
-        if rank_value is None or lift_value is None or rank_value > 100:
-            return None
-        return {"rank": rank_value, "weight_class_kg": wc}
+    def badge(rank_idx, value_idx):
+        candidates = [
+            {"rank": r[rank_idx], "weight_class_kg": r[0]}
+            for r in rows
+            if r[rank_idx] is not None and r[value_idx] is not None and r[rank_idx] <= 100
+        ]
+        return min(candidates, key=lambda b: b["rank"]) if candidates else None
 
     return {
-        "total": badge(rank, total_kg),
-        "squat": badge(rank_squat, squat_kg),
-        "bench": badge(rank_bench, bench_kg),
-        "deadlift": badge(rank_deadlift, deadlift_kg),
+        "total": badge(1, 5),
+        "squat": badge(2, 6),
+        "bench": badge(3, 7),
+        "deadlift": badge(4, 8),
     }
 
 

@@ -7,7 +7,7 @@ Run once after downloading a new export:
 Creates/overwrites data/openipf.duckdb with:
   - entries        : full raw dataset, lightly typed
   - rankings_raw   : precomputed top-15-per-weight-class leaderboard (Raw, SBD meets,
-                     each lifter's most recent meet in the last 2 years only)
+                     each lifter's best total per weight class in the last 2 years)
 """
 import duckdb
 from pathlib import Path
@@ -100,10 +100,15 @@ def main():
     """)
 
     # Each lifter's best qualifying total in the last 2 years is what gets
-    # ranked (not simply whichever meet happens to be most recent) -- so a
-    # lifter can't get bumped down by competing again and doing worse, but
-    # still ages out of the window like any other rolling-activity ranking.
-    # Ties on total fall back to the most recent of the tied meets.
+    # ranked, computed independently PER WEIGHT CLASS -- not one single best
+    # meet per lifter across all classes. A lifter who competes at more than
+    # one class in the window legitimately shows up on each class's board
+    # they qualify for; collapsing to one global-best meet previously locked
+    # a lifter into whichever class they happened to be heaviest in, hiding
+    # strong results in any other class they also competed at (most totals
+    # scale with bodyweight, so the "global best" was almost always their
+    # heaviest class). Ties on total fall back to the most recent of the
+    # tied meets.
     effective_class = inferred_class_sql("e.bodyweight_kg", "e.sex")
     con.execute(f"""
         CREATE TABLE latest_per_lifter AS
@@ -119,7 +124,8 @@ def main():
           AND e.total_kg IS NOT NULL
           AND e.meet_date >= CURRENT_DATE - INTERVAL 2 YEAR
         QUALIFY row_number() OVER (
-            PARTITION BY e.lifter_key, e.sex
+            PARTITION BY e.lifter_key, e.sex,
+                         COALESCE(NULLIF(trim(e.weight_class_kg), ''), {effective_class})
             ORDER BY e.total_kg DESC, e.meet_date DESC
         ) = 1
     """)
