@@ -94,9 +94,19 @@ def main():
     n = con.execute("select count(*) from entries").fetchone()[0]
     print(f"Loaded {n:,} rows.")
 
+    # The recorded class, or (when the meet didn't record one) the class
+    # inferred from bodyweight. Stored once here so the leaderboard and the
+    # backend's lifter profiles / percentiles all agree on a lifter's class.
+    con.execute("ALTER TABLE entries ADD COLUMN effective_weight_class_kg VARCHAR")
+    con.execute(f"""
+        UPDATE entries SET effective_weight_class_kg =
+            COALESCE(NULLIF(trim(weight_class_kg), ''),
+                     {inferred_class_sql("bodyweight_kg", "sex")})
+    """)
+
     print("Indexing...")
     con.execute("CREATE INDEX idx_entries_lifter ON entries(lifter_key)")
-    con.execute("CREATE INDEX idx_entries_class ON entries(sex, weight_class_kg)")
+    con.execute("CREATE INDEX idx_entries_class ON entries(sex, effective_weight_class_kg)")
 
     print("Building rankings_raw (each lifter's best Raw SBD meet in the last 2 years)...")
     classes_sql = " UNION ALL ".join(
@@ -117,25 +127,25 @@ def main():
     # strong results in any other class they also competed at (most totals
     # scale with bodyweight, so the "global best" was almost always their
     # heaviest class). Ties on total fall back to the most recent of the
-    # tied meets.
-    effective_class = inferred_class_sql("e.bodyweight_kg", "e.sex")
-    con.execute(f"""
+    # tied meets, then the lighter bodyweight (the same lifter can be entered
+    # twice at one meet, e.g. in two divisions, with slightly different
+    # weigh-ins -- without this the pick, and so their rank, is arbitrary).
+    con.execute("""
         CREATE TABLE latest_per_lifter AS
-        SELECT e.* EXCLUDE (weight_class_kg),
-               COALESCE(NULLIF(trim(e.weight_class_kg), ''), {effective_class}) AS weight_class_kg
+        SELECT e.* EXCLUDE (weight_class_kg, effective_weight_class_kg),
+               e.effective_weight_class_kg AS weight_class_kg
         FROM entries e
         JOIN valid_classes vc
           ON e.sex = vc.sex
-         AND COALESCE(NULLIF(trim(e.weight_class_kg), ''), {effective_class}) = vc.weight_class_kg
+         AND e.effective_weight_class_kg = vc.weight_class_kg
         WHERE e.equipment = 'Raw'
           AND e.event = 'SBD'
           AND e.place != 'DQ'
           AND e.total_kg IS NOT NULL
           AND e.meet_date >= CURRENT_DATE - INTERVAL 2 YEAR
         QUALIFY row_number() OVER (
-            PARTITION BY e.lifter_key, e.sex,
-                         COALESCE(NULLIF(trim(e.weight_class_kg), ''), {effective_class})
-            ORDER BY e.total_kg DESC, e.meet_date DESC
+            PARTITION BY e.lifter_key, e.sex, e.effective_weight_class_kg
+            ORDER BY e.total_kg DESC, e.meet_date DESC, e.bodyweight_kg ASC NULLS LAST
         ) = 1
     """)
 
@@ -184,6 +194,10 @@ def main():
         FROM latest_per_lifter
         ORDER BY sex, weight_class_kg, rank
     """)
+
+    # Records which day the 2-year window above was measured from, so
+    # validate_rankings.py can re-derive against the same window later.
+    con.execute("CREATE TABLE build_info AS SELECT CURRENT_DATE AS built_on")
 
     con.execute("DROP TABLE valid_classes")
     con.execute("DROP TABLE latest_per_lifter")

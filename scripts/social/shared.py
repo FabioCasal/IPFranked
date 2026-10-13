@@ -86,6 +86,12 @@ def fit_size(draw, text, fnt_path, max_size, min_size, max_width):
     return size
 
 
+def fmt1(value):
+    """One-decimal number for a table cell, or a dash when the export left it
+    blank (e.g. no recorded bodyweight, and therefore no Dots either)."""
+    return "-" if value is None else f"{value:.1f}"
+
+
 def centered_text(draw, cy, text, fnt, fill):
     """Draw single-line text horizontally centered on the canvas, vertically
     centered on cy. Returns the rendered text height."""

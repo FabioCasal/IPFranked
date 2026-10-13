@@ -36,7 +36,7 @@ def population_percentile(sex, weight_class_kg, field, value, equipment="Raw", e
             f"""
             SELECT max({field}) AS best
             FROM entries
-            WHERE sex = ? AND weight_class_kg = ? AND equipment = ? AND place != 'DQ'
+            WHERE sex = ? AND effective_weight_class_kg = ? AND equipment = ? AND place != 'DQ'
               AND {field} IS NOT NULL
               {event_clause}
             GROUP BY lifter_key
@@ -185,7 +185,7 @@ def lifter_profile(lifter_key: str):
             """
             SELECT Name AS name, Sex AS sex, Event AS event, Equipment AS equipment,
                    age, age_class, Division AS division,
-                   bodyweight_kg, weight_class_kg, best_squat_kg, best_bench_kg,
+                   bodyweight_kg, weight_class_kg, effective_weight_class_kg, best_squat_kg, best_bench_kg,
                    best_deadlift_kg, total_kg, place, dots, wilks, glossbrenner,
                    goodlift, tested, federation, meet_date, meet_country, meet_state,
                    meet_town, meet_name
@@ -227,7 +227,7 @@ def lifter_profile(lifter_key: str):
         if not candidates:
             return None, None
         top = max(candidates, key=lambda m: m[field])
-        return top[field], top["weight_class_kg"]
+        return top[field], top["effective_weight_class_kg"]
 
     total_val, total_wc = best_with_class("total_kg", equipment="Raw", event="SBD")
     squat_val, squat_wc = best_with_class("best_squat_kg", equipment="Raw")
@@ -258,7 +258,9 @@ def lifter_profile(lifter_key: str):
         if m["event"] == "SBD"
     ]
 
-    weight_classes_seen = sorted({m["weight_class_kg"] for m in meets if m["weight_class_kg"]})
+    weight_classes_seen = sorted(
+        {m["effective_weight_class_kg"] for m in meets if m["effective_weight_class_kg"]}
+    )
     federations = sorted({m["federation"] for m in meets if m["federation"]})
 
     return {

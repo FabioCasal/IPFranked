@@ -52,7 +52,10 @@ def effective_class(sex, raw_class, bodyweight_kg):
     return classify(sex, bodyweight_kg)
 
 
-def load_qualifying_entries(con):
+def load_qualifying_entries(con, built_on):
+    # The 2-year window is anchored to the day the DB was built, not today --
+    # otherwise validating a day after a rebuild shifts the window and reports
+    # boundary meets as spurious mismatches.
     rows = con.execute(
         """
         SELECT lifter_key, Sex AS sex, weight_class_kg, bodyweight_kg, total_kg,
@@ -60,8 +63,9 @@ def load_qualifying_entries(con):
         FROM entries
         WHERE Equipment = 'Raw' AND Event = 'SBD' AND place != 'DQ'
           AND total_kg IS NOT NULL
-          AND meet_date >= CURRENT_DATE - INTERVAL 2 YEAR
-        """
+          AND meet_date >= ?::DATE - INTERVAL 2 YEAR
+        """,
+        [built_on],
     ).fetchall()
     cols = [d[0] for d in con.description]
     return [dict(zip(cols, r)) for r in rows]
@@ -70,11 +74,15 @@ def load_qualifying_entries(con):
 def representative_row_per_lifter_class(entries):
     """build_db.py's latest_per_lifter keeps exactly ONE row per
     (lifter_key, sex, class) -- the one with the best total_kg (ties: most
-    recent date) -- and ALL FOUR lift rank columns (rank, rank_squat,
+    recent date, then lighter bodyweight) -- and ALL FOUR lift rank columns (rank, rank_squat,
     rank_bench, rank_deadlift) are computed from that SAME row. It is not
     each lift's own independently-best meet. Mirror that here exactly."""
     groups = defaultdict(list)
     for e in entries:
+        # OpenIPF also uses sexes with no IPF classes (e.g. 'Mx'); build_db.py
+        # drops them via its valid_classes join, so they're never ranked.
+        if e["sex"] not in WEIGHT_CLASSES:
+            continue
         cls = effective_class(e["sex"], e["weight_class_kg"], e["bodyweight_kg"])
         if cls is None or cls not in WEIGHT_CLASSES[e["sex"]]:
             continue
@@ -82,7 +90,11 @@ def representative_row_per_lifter_class(entries):
 
     best = {}
     for key, rows in groups.items():
-        rows.sort(key=lambda e: (-e["total_kg"], -e["meet_date"].toordinal()))
+        rows.sort(key=lambda e: (
+            -e["total_kg"],
+            -e["meet_date"].toordinal(),
+            float("inf") if e["bodyweight_kg"] is None else e["bodyweight_kg"],
+        ))
         best[key] = rows[0]
     return best
 
@@ -199,8 +211,13 @@ def check_valid_classes(con, failures):
 
 def main():
     con = duckdb.connect(str(DB_PATH), read_only=True)
-    entries = load_qualifying_entries(con)
-    print(f"Loaded {len(entries):,} qualifying entries (Raw, SBD, non-DQ, last 2 years).\n")
+    try:
+        built_on = con.execute("SELECT built_on FROM build_info").fetchone()[0]
+    except duckdb.CatalogException:
+        print("Database has no build_info table -- rebuild it with scripts/build_db.py first.")
+        sys.exit(1)
+    entries = load_qualifying_entries(con, built_on)
+    print(f"Loaded {len(entries):,} qualifying entries (Raw, SBD, non-DQ, 2 years before {built_on}).\n")
 
     failures = []
     check_no_duplicates(con, failures)

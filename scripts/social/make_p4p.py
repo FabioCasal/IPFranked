@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw
 from shared import (
     ACCENT, BADGE_DARK_TEXT, BG, BORDER, BRONZE, DB_PATH, DEFAULT_OUT_DIR,
     FONT_BOLD, FONT_REG, FONT_SEMIBOLD, GOLD, H, PANEL, PANEL_2, SILVER,
-    TEXT, TEXT_DIM, W, draw_inline_wordmark, draw_mixed_text, fit_size, font,
+    TEXT, TEXT_DIM, W, draw_inline_wordmark, draw_mixed_text, fit_size, fmt1, font,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -60,6 +60,9 @@ def fetch_p4p_rows(sex, limit=15):
 def build_p4p_graphic(sex, label, out_path):
     rows = fetch_p4p_rows(sex)
     n = len(rows)
+    if n == 0:
+        print("skipped", out_path, "(no ranked lifters)")
+        return
 
     img = Image.new("RGB", (W, H), BG)
     draw = ImageDraw.Draw(img)
@@ -138,12 +141,12 @@ def build_p4p_graphic(sex, label, out_path):
         draw_mixed_text(draw, (name_col_x, cy), display_name, FONT_SEMIBOLD, name_size, TEXT, anchor="lm")
 
         draw.text((class_x, cy), f"{weight_class_kg}kg", font=f_num, fill=TEXT_DIM, anchor="rm")
-        draw.text((bw_x, cy), f"{bw_kg:.1f}", font=f_num, fill=TEXT_DIM, anchor="rm")
+        draw.text((bw_x, cy), fmt1(bw_kg), font=f_num, fill=TEXT_DIM, anchor="rm")
         date_str = f"{meet_date:%b} {meet_date.day}, {meet_date.year}"
         draw.text((date_x, cy), date_str, font=f_num, fill=TEXT_DIM, anchor="rm")
 
-        draw.text((total_x, cy), f"{total_kg:.1f}", font=f_total, fill=TEXT, anchor="rm")
-        draw.text((dots_x, cy), f"{dots:.1f}", font=f_dots, fill=ACCENT, anchor="rm")
+        draw.text((total_x, cy), fmt1(total_kg), font=f_total, fill=TEXT, anchor="rm")
+        draw.text((dots_x, cy), fmt1(dots), font=f_dots, fill=ACCENT, anchor="rm")
 
         if i < n - 1:
             draw.line([(0, y1), (W, y1)], fill=BORDER, width=1)

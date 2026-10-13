@@ -198,7 +198,7 @@ function ordinalSuffix(n) {
   return { 1: 'st', 2: 'nd', 3: 'rd' }[Math.floor(n) % 10] || 'th';
 }
 function percentileHtml(p, rankInfo) {
-  const rankBadge = rankInfo ? `<div class="rank-tag">#${rankInfo.rank} current rank</div>` : '';
+  const rankBadge = rankInfo ? `<div class="rank-tag">#${rankInfo.rank} current rank (${rankInfo.weight_class_kg}kg)</div>` : '';
   const percentileLine = p
     ? `<div class="percentile">${p.percentile}<sup>${ordinalSuffix(p.percentile)}</sup> percentile <span class="muted">(${p.weight_class_kg}kg class)</span></div>`
     : '';
