@@ -1,4 +1,0 @@
-duckdb
-fastapi
-uvicorn[standard]
-pillow
