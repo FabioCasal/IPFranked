@@ -30,17 +30,10 @@ def fetch_rows(sex, weight_class, limit=15):
     con = duckdb.connect(str(DB_PATH), read_only=True)
     rows = con.execute(
         """
-        select r.rank, r.name, r.bodyweight_kg, r.meet_date, r.total_kg, e.dots
-        from rankings_raw r
-        join entries e
-          on e.lifter_key = r.lifter_key
-         and e.sex = r.sex
-         and e.meet_date = r.meet_date
-         and e.total_kg = r.total_kg
-         and e.equipment = 'Raw' and e.event = 'SBD'
-        where r.sex = ? and r.weight_class_kg = ? and r.rank <= ?
-        qualify row_number() over (partition by r.rank order by e.dots desc) = 1
-        order by r.rank
+        select rank, name, bodyweight_kg, meet_date, total_kg, dots
+        from rankings_raw
+        where sex = ? and weight_class_kg = ? and rank <= ?
+        order by rank
         """,
         [sex, weight_class, limit],
     ).fetchall()

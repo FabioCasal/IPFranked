@@ -100,6 +100,11 @@
   .chart-wrap h3 { margin: 0 0 12px; font-size: 14px; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: 0.4px; }
 
   .empty { color: var(--text-dim); padding: 40px 0; text-align: center; }
+  .retry-btn {
+    margin-left: 8px; background: transparent; border: 1px solid var(--border); color: var(--text);
+    padding: 4px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+  }
+  .retry-btn:hover { border-color: var(--accent); color: var(--accent); }
   .table-wrap { overflow-x: auto; background: var(--panel); border-radius: 8px; }
   .table-wrap table { border-radius: 0; }
 
@@ -191,16 +196,33 @@ const api = (path) => fetch(path).then(r => {
   return r.json();
 });
 const fmt = (v, d = 1) => (v === null || v === undefined) ? '—' : Number(v).toFixed(d);
-const fmtDate = (d) => d ? new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+// Meet dates are date-only strings ("2026-03-14"), which Date parses as
+// midnight UTC -- format in UTC too, or users west of UTC see the day before.
+const fmtDate = (d) => d ? new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' }) : '—';
+// Names, meet names etc. come straight from the OpenIPF export, so escape them
+// before they go into innerHTML templates (text or attribute values).
+const esc = (v) => (v === null || v === undefined) ? '' : String(v)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// Per-view request counters: a response is only rendered if no newer request
+// for the same view started while it was in flight (e.g. quick class switches).
+const requestSeq = {};
+const nextRequest = (view) => (requestSeq[view] = (requestSeq[view] || 0) + 1);
+const isCurrent = (view, id) => requestSeq[view] === id;
+function renderError(container, retry, { tableRow = false } = {}) {
+  const inner = `<div class="empty">Couldn't load data. <button type="button" class="retry-btn">Retry</button></div>`;
+  container.innerHTML = tableRow ? `<tr><td colspan="10">${inner}</td></tr>` : inner;
+  container.querySelector('.retry-btn').onclick = retry;
+}
 function ordinalSuffix(n) {
   const v = Math.floor(n) % 100;
   if (v >= 11 && v <= 13) return 'th';
   return { 1: 'st', 2: 'nd', 3: 'rd' }[Math.floor(n) % 10] || 'th';
 }
 function percentileHtml(p, rankInfo) {
-  const rankBadge = rankInfo ? `<div class="rank-tag">#${rankInfo.rank} current rank (${rankInfo.weight_class_kg}kg)</div>` : '';
+  const rankBadge = rankInfo ? `<div class="rank-tag">#${rankInfo.rank} current rank (${esc(rankInfo.weight_class_kg)}kg)</div>` : '';
   const percentileLine = p
-    ? `<div class="percentile">${p.percentile}<sup>${ordinalSuffix(p.percentile)}</sup> percentile <span class="muted">(${p.weight_class_kg}kg class)</span></div>`
+    ? `<div class="percentile">${p.percentile}<sup>${ordinalSuffix(p.percentile)}</sup> percentile <span class="muted">(${esc(p.weight_class_kg)}kg class)</span></div>`
     : '';
   return percentileLine + rankBadge;
 }
@@ -233,15 +255,23 @@ const SEX_LABELS = { M: "Men's Divisions", F: "Women's Divisions" };
 const championsBody = document.getElementById('champions-body');
 
 async function loadChampions() {
-  const data = await api('/api/champions');
+  const id = nextRequest('champions');
+  let data;
+  try {
+    data = await api('/api/champions');
+  } catch (err) {
+    if (isCurrent('champions', id)) renderError(championsBody, loadChampions);
+    return;
+  }
+  if (!isCurrent('champions', id)) return;
   championsBody.innerHTML = Object.entries(SEX_LABELS).map(([sex, label]) => `
     <div class="division-group">
       <h2>${label}</h2>
       <div class="champ-grid">
         ${(data[sex] || []).map(c => `
-          <div class="champ-card" data-sex="${sex}" data-class="${c.weight_class_kg}">
-            <div class="wc-label">${c.weight_class_kg} kg</div>
-            <div class="champ-name">${c.name}</div>
+          <div class="champ-card" data-sex="${sex}" data-class="${esc(c.weight_class_kg)}">
+            <div class="wc-label">${esc(c.weight_class_kg)} kg</div>
+            <div class="champ-name">${esc(c.name)}</div>
             <div class="champ-lifts">S ${fmt(c.best_squat_kg, 0)} · B ${fmt(c.best_bench_kg, 0)} · D ${fmt(c.best_deadlift_kg, 0)}</div>
             <div class="champ-stats">
               <div class="champ-total">${fmt(c.total_kg, 1)} <small>kg total</small></div>
@@ -255,7 +285,7 @@ async function loadChampions() {
     card.onclick = async () => {
       showView('rankings');
       sexSelect.value = card.dataset.sex;
-      await loadClasses();
+      if (!await loadClasses()) return;
       classSelect.value = card.dataset.class;
       await loadRankings();
     };
@@ -267,31 +297,52 @@ const sexSelect = document.getElementById('sex-select');
 const classSelect = document.getElementById('class-select');
 const rankingsBody = document.getElementById('rankings-body');
 
+// Resolves true only if this call's classes were rendered, so callers know
+// whether it's safe to go on and load rankings for the new selection.
 async function loadClasses() {
-  const data = await api(`/api/weight-classes?sex=${sexSelect.value}`);
-  classSelect.innerHTML = data.weight_classes.map(c => `<option value="${c}">${c} kg</option>`).join('');
+  const id = nextRequest('classes');
+  let data;
+  try {
+    data = await api(`/api/weight-classes?sex=${sexSelect.value}`);
+  } catch (err) {
+    if (isCurrent('classes', id)) {
+      renderError(rankingsBody, async () => { if (await loadClasses()) await loadRankings(); }, { tableRow: true });
+    }
+    return false;
+  }
+  if (!isCurrent('classes', id)) return false;
+  classSelect.innerHTML = data.weight_classes.map(c => `<option value="${esc(c)}">${esc(c)} kg</option>`).join('');
+  return true;
 }
 
 async function loadRankings() {
   const sex = sexSelect.value, wc = classSelect.value;
   if (!wc) return;
+  const id = nextRequest('rankings');
   rankingsBody.innerHTML = `<tr><td colspan="10" class="empty">Loading…</td></tr>`;
-  const data = await api(`/api/rankings?sex=${sex}&weight_class=${encodeURIComponent(wc)}`);
+  let data;
+  try {
+    data = await api(`/api/rankings?sex=${sex}&weight_class=${encodeURIComponent(wc)}`);
+  } catch (err) {
+    if (isCurrent('rankings', id)) renderError(rankingsBody, loadRankings, { tableRow: true });
+    return;
+  }
+  if (!isCurrent('rankings', id)) return;
   if (!data.lifters.length) {
     rankingsBody.innerHTML = `<tr><td colspan="10" class="empty">No data</td></tr>`;
     return;
   }
   rankingsBody.innerHTML = data.lifters.map(l => `
-    <tr class="rank-row" data-key="${l.lifter_key}">
+    <tr class="rank-row" data-key="${esc(l.lifter_key)}">
       <td><span class="rank-badge ${l.rank <= 3 ? 'r' + l.rank : ''}">${l.rank}</span></td>
-      <td>${l.name}</td>
+      <td>${esc(l.name)}</td>
       <td class="num">${fmt(l.total_kg)}</td>
       <td class="num">${fmt(l.best_squat_kg)}</td>
       <td class="num">${fmt(l.best_bench_kg)}</td>
       <td class="num">${fmt(l.best_deadlift_kg)}</td>
       <td class="num">${fmt(l.bodyweight_kg)}</td>
       <td class="num">${fmt(l.goodlift)}</td>
-      <td>${l.federation ?? '—'}</td>
+      <td>${esc(l.federation ?? '—')}</td>
       <td>${fmtDate(l.meet_date)}</td>
     </tr>
   `).join('');
@@ -300,7 +351,7 @@ async function loadRankings() {
   });
 }
 
-sexSelect.onchange = async () => { await loadClasses(); await loadRankings(); };
+sexSelect.onchange = async () => { if (await loadClasses()) await loadRankings(); };
 classSelect.onchange = loadRankings;
 
 // ---------- Lifter search ----------
@@ -311,14 +362,26 @@ let searchTimer = null;
 searchInput.addEventListener('input', () => {
   clearTimeout(searchTimer);
   const q = searchInput.value.trim();
+  // Bumping the counter here also discards any in-flight search when the
+  // query is cleared or shortened below 2 characters.
+  const id = nextRequest('search');
   if (q.length < 2) { searchResults.style.display = 'none'; return; }
   searchTimer = setTimeout(async () => {
-    const data = await api(`/api/lifters/search?q=${encodeURIComponent(q)}`);
+    let data;
+    try {
+      data = await api(`/api/lifters/search?q=${encodeURIComponent(q)}`);
+    } catch (err) {
+      if (!isCurrent('search', id)) return;
+      searchResults.innerHTML = `<div class="muted">Search failed — try again</div>`;
+      searchResults.style.display = 'block';
+      return;
+    }
+    if (!isCurrent('search', id)) return;
     if (!data.results.length) {
       searchResults.innerHTML = `<div class="muted">No matches</div>`;
     } else {
       searchResults.innerHTML = data.results.map(r => `
-        <div data-key="${r.lifter_key}">${r.name} <span class="muted">· ${r.sex} · ${r.meet_count} meets · best total ${fmt(r.best_total_kg, 0)}kg</span></div>
+        <div data-key="${esc(r.lifter_key)}">${esc(r.name)} <span class="muted">· ${esc(r.sex)} · ${r.meet_count} meets · best total ${fmt(r.best_total_kg, 0)}kg</span></div>
       `).join('');
       [...searchResults.children].forEach((el, i) => {
         el.onclick = () => { openLifter(data.results[i].lifter_key); searchResults.style.display = 'none'; searchInput.value = data.results[i].name; };
@@ -337,13 +400,21 @@ const progressionCharts = { total: null, squat: null, bench: null, deadlift: nul
 async function openLifter(key) {
   showView('lifter');
   const profileEl = document.getElementById('lifter-profile');
+  const id = nextRequest('lifter');
   profileEl.innerHTML = `<div class="empty">Loading…</div>`;
-  const p = await api(`/api/lifters/${encodeURIComponent(key)}`);
+  let p;
+  try {
+    p = await api(`/api/lifters/${encodeURIComponent(key)}`);
+  } catch (err) {
+    if (isCurrent('lifter', id)) renderError(profileEl, () => openLifter(key));
+    return;
+  }
+  if (!isCurrent('lifter', id)) return;
 
   const b = p.bests;
   profileEl.innerHTML = `
     <div class="profile-header">
-      <h2>${p.name}</h2>
+      <h2>${esc(p.name)}</h2>
     </div>
     <div class="stat-row">
       <div class="stat-tile"><div class="label">Best Raw Total</div><div class="value">${fmt(b.total_kg_raw, 1)} <small>kg</small></div>${percentileHtml(p.percentiles.total, p.current_ranks.total)}</div>
@@ -383,16 +454,16 @@ async function openLifter(key) {
           ${[...p.meets].reverse().map(m => `
             <tr>
               <td>${fmtDate(m.meet_date)}</td>
-              <td>${m.meet_name ?? '—'}</td>
-              <td>${m.federation ?? '—'}</td>
-              <td>${m.equipment ?? '—'}</td>
-              <td>${m.division ?? '—'}</td>
+              <td>${esc(m.meet_name ?? '—')}</td>
+              <td>${esc(m.federation ?? '—')}</td>
+              <td>${esc(m.equipment ?? '—')}</td>
+              <td>${esc(m.division ?? '—')}</td>
               <td class="num">${fmt(m.bodyweight_kg)}</td>
               <td class="num">${fmt(m.best_squat_kg)}</td>
               <td class="num">${fmt(m.best_bench_kg)}</td>
               <td class="num">${fmt(m.best_deadlift_kg)}</td>
               <td class="num">${fmt(m.total_kg)}</td>
-              <td>${m.place ?? '—'}</td>
+              <td>${esc(m.place ?? '—')}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -430,9 +501,8 @@ async function openLifter(key) {
 
 // ---------- init ----------
 (async function init() {
-  await loadChampions();
-  await loadClasses();
-  await loadRankings();
+  loadChampions();
+  if (await loadClasses()) await loadRankings();
 })();
 </script>
 </body>

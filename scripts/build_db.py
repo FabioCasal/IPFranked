@@ -52,8 +52,24 @@ def inferred_class_sql(bodyweight_expr, sex_expr):
 
 
 def main():
-    DB_PATH.unlink(missing_ok=True)
-    con = duckdb.connect(str(DB_PATH))
+    if not CSV_PATH.exists():
+        raise SystemExit(f"CSV export not found: {CSV_PATH}")
+
+    # Build into a temp file and only swap it over DB_PATH once everything
+    # succeeds, so a missing/bad export never destroys the last working DB.
+    tmp_path = DB_PATH.with_name(DB_PATH.name + ".tmp")
+    tmp_path.unlink(missing_ok=True)
+    try:
+        build(tmp_path)
+        tmp_path.replace(DB_PATH)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    print(f"Done. Database at {DB_PATH}")
+
+
+def build(db_path):
+    con = duckdb.connect(str(db_path))
 
     print("Loading CSV into 'entries' table...")
     con.execute(f"""
@@ -188,6 +204,7 @@ def main():
             bodyweight_kg,
             goodlift,
             wilks,
+            dots,
             federation,
             meet_date,
             meet_name
@@ -206,7 +223,6 @@ def main():
     print(f"rankings_raw built: {n_rank:,} rows.")
 
     con.close()
-    print(f"Done. Database at {DB_PATH}")
 
 
 if __name__ == "__main__":
