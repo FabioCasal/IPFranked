@@ -1,0 +1,6 @@
+.venv/
+data/raw/
+data/*.duckdb
+social/output/
+__pycache__/
+*.pyc
