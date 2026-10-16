@@ -3,6 +3,10 @@
 Canvas and palette intentionally mirror frontend/index.html's :root vars so
 every graphic reads as the same brand as the live site.
 """
+import errno
+import os
+import tempfile
+import time
 from pathlib import Path
 
 from PIL import ImageFont
@@ -132,3 +136,41 @@ def draw_inline_wordmark(draw, xy, size=50):
     draw.text((x, y), "IPF", font=f_word, fill=ACCENT, anchor="lm")
     ipf_w = draw.textlength("IPF", font=f_word)
     draw.text((x + ipf_w, y), "ranked", font=f_word, fill=TEXT, anchor="lm")
+
+
+def _is_lock_error(e):
+    """True for the transient errors a briefly-locked file raises on Windows
+    (sharing violation / access denied / Errno 22), not for permanent ones."""
+    return (isinstance(e, PermissionError)
+            or e.errno == errno.EINVAL
+            or getattr(e, "winerror", None) in (5, 32, 33))
+
+
+def _retry_on_lock(fn, attempts=10, delay=0.5):
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except OSError as e:
+            if attempt == attempts - 1 or not _is_lock_error(e):
+                raise
+            time.sleep(delay)
+
+
+def save(img, out_path):
+    """Write via a temp file + rename, retrying briefly: on this machine a freshly
+    written PNG is often held open for a moment (AV scan / Explorer thumbnail),
+    and overwriting it in place fails with Errno 22."""
+    out_path = Path(out_path)
+    # Unique temp name per call (parallel runs can't collide), keeping the real
+    # suffix so PIL picks the right format.
+    fd, tmp = tempfile.mkstemp(
+        dir=out_path.parent, prefix=f".{out_path.stem}.", suffix=out_path.suffix,
+    )
+    os.close(fd)
+    try:
+        _retry_on_lock(lambda: img.save(tmp))
+        _retry_on_lock(lambda: os.replace(tmp, out_path))
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    print("saved", out_path)

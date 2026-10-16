@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw
 
 from shared import (
     ACCENT, BG, DEFAULT_OUT_DIR, FONT_BOLD, FONT_REG, FONT_SEMIBOLD, H, TEXT,
-    TEXT_DIM, W, centered_text, draw_wordmark, font,
+    TEXT_DIM, W, centered_text, draw_wordmark, font, save,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -56,8 +56,7 @@ def build_title_slide(category_label, out_path, subtitle="TOP 15 LEADERBOARDS", 
     f_footer = font(FONT_REG, 19)
     draw.text((40, H - 50), "data provided by Open IPF", font=f_footer, fill=TEXT_DIM, anchor="lm")
 
-    img.save(out_path)
-    print("saved", out_path)
+    save(img, out_path)
 
 
 def build_cta_slide(out_path):
@@ -78,8 +77,7 @@ def build_cta_slide(out_path):
     handle_cy = H * 0.63
     centered_text(draw, handle_cy, HANDLE, f_handle, TEXT)
 
-    img.save(out_path)
-    print("saved", out_path)
+    save(img, out_path)
 
 
 def main():

@@ -17,6 +17,7 @@ from shared import (
     ACCENT, BADGE_DARK_TEXT, BG, BORDER, BRONZE, DB_PATH, DEFAULT_OUT_DIR,
     FONT_BOLD, FONT_REG, FONT_SEMIBOLD, GOLD, H, PANEL, PANEL_2, SILVER,
     TEXT, TEXT_DIM, W, draw_inline_wordmark, draw_mixed_text, fit_size, fmt1, font,
+    save,
 )
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -161,8 +162,7 @@ def build_p4p_graphic(sex, label, out_path):
         font=f_footer, fill=TEXT_DIM, anchor="lm",
     )
 
-    img.save(out_path)
-    print("saved", out_path)
+    save(img, out_path)
 
 
 def main():
