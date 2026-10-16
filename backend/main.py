@@ -36,7 +36,7 @@ def population_percentile(sex, weight_class_kg, field, value, equipment="Raw", e
             f"""
             SELECT max({field}) AS best
             FROM entries
-            WHERE sex = ? AND weight_class_kg = ? AND equipment = ? AND place != 'DQ'
+            WHERE sex = ? AND effective_weight_class_kg = ? AND equipment = ? AND place != 'DQ'
               AND {field} IS NOT NULL
               {event_clause}
             GROUP BY lifter_key
@@ -61,11 +61,18 @@ def population_percentile(sex, weight_class_kg, field, value, equipment="Raw", e
 
 
 def current_ranks_for(lifter_key):
-    """Each lift's rank in the app's own current ranking system (most recent
-    qualifying meet in the last 2 years), not an all-time historical rank."""
+    """Each lift's rank in the app's own current ranking system (best
+    qualifying meet in the last 2 years), not an all-time historical rank.
+
+    A lifter can have one rankings_raw row per weight class they've qualified
+    in within the window, and the four lifts' bests don't have to all come
+    from the same one -- e.g. their best-ranked squat and best-ranked total
+    could be from different meets in different classes. So each lift picks
+    its own best rank independently across all of that lifter's rows,
+    rather than reading all four off a single arbitrarily-chosen row."""
     con = db()
     try:
-        row = con.execute(
+        rows = con.execute(
             """
             SELECT weight_class_kg, rank, rank_squat, rank_bench, rank_deadlift,
                    total_kg, best_squat_kg, best_bench_kg, best_deadlift_kg
@@ -73,24 +80,25 @@ def current_ranks_for(lifter_key):
             WHERE lifter_key = ?
             """,
             [lifter_key],
-        ).fetchone()
+        ).fetchall()
     finally:
         con.close()
-    if not row:
+    if not rows:
         return {"total": None, "squat": None, "bench": None, "deadlift": None}
 
-    wc, rank, rank_squat, rank_bench, rank_deadlift, total_kg, squat_kg, bench_kg, deadlift_kg = row
-
-    def badge(rank_value, lift_value):
-        if rank_value is None or lift_value is None or rank_value > 100:
-            return None
-        return {"rank": rank_value, "weight_class_kg": wc}
+    def badge(rank_idx, value_idx):
+        candidates = [
+            {"rank": r[rank_idx], "weight_class_kg": r[0]}
+            for r in rows
+            if r[rank_idx] is not None and r[value_idx] is not None and r[rank_idx] <= 100
+        ]
+        return min(candidates, key=lambda b: b["rank"]) if candidates else None
 
     return {
-        "total": badge(rank, total_kg),
-        "squat": badge(rank_squat, squat_kg),
-        "bench": badge(rank_bench, bench_kg),
-        "deadlift": badge(rank_deadlift, deadlift_kg),
+        "total": badge(1, 5),
+        "squat": badge(2, 6),
+        "bench": badge(3, 7),
+        "deadlift": badge(4, 8),
     }
 
 
@@ -177,7 +185,7 @@ def lifter_profile(lifter_key: str):
             """
             SELECT Name AS name, Sex AS sex, Event AS event, Equipment AS equipment,
                    age, age_class, Division AS division,
-                   bodyweight_kg, weight_class_kg, best_squat_kg, best_bench_kg,
+                   bodyweight_kg, weight_class_kg, effective_weight_class_kg, best_squat_kg, best_bench_kg,
                    best_deadlift_kg, total_kg, place, dots, wilks, glossbrenner,
                    goodlift, tested, federation, meet_date, meet_country, meet_state,
                    meet_town, meet_name
@@ -219,7 +227,7 @@ def lifter_profile(lifter_key: str):
         if not candidates:
             return None, None
         top = max(candidates, key=lambda m: m[field])
-        return top[field], top["weight_class_kg"]
+        return top[field], top["effective_weight_class_kg"]
 
     total_val, total_wc = best_with_class("total_kg", equipment="Raw", event="SBD")
     squat_val, squat_wc = best_with_class("best_squat_kg", equipment="Raw")
@@ -250,7 +258,9 @@ def lifter_profile(lifter_key: str):
         if m["event"] == "SBD"
     ]
 
-    weight_classes_seen = sorted({m["weight_class_kg"] for m in meets if m["weight_class_kg"]})
+    weight_classes_seen = sorted(
+        {m["effective_weight_class_kg"] for m in meets if m["effective_weight_class_kg"]}
+    )
     federations = sorted({m["federation"] for m in meets if m["federation"]})
 
     return {
